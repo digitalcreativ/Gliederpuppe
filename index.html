@@ -90,6 +90,18 @@ input[type=range]{width:100%; accent-color:var(--accent); margin:0; height:22px}
 .views button:hover{background:var(--accent-soft)}
 .hint{position:absolute; left:12px; right:12px; bottom:10px; margin:0; font-size:.76rem; color:var(--muted); text-align:center; pointer-events:none}
 .hint-mobile{display:none}
+.fs-btn{position:absolute; right:12px; bottom:10px; width:38px; height:38px; display:grid; place-items:center; padding:0; border-radius:10px; border:1px solid var(--line); background:var(--panel); color:var(--fg); cursor:pointer}
+.fs-btn:hover{border-color:var(--accent); color:var(--accent)}
+.fs-btn:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+.fs-btn svg{width:20px; height:20px}
+.fs-btn .i-exit{display:none}
+.stage.is-full .fs-btn .i-enter{display:none}
+.stage.is-full .fs-btn .i-exit{display:block}
+.stage .hint{right:60px; left:60px}
+.stage:fullscreen{border-radius:0; border:0; width:100%; height:100%}
+.stage:-webkit-full-screen{border-radius:0; border:0; width:100%; height:100%}
+.stage.pseudo-full{position:fixed; inset:0; z-index:1000; border-radius:0; border:0; width:auto; height:auto!important; min-height:0}
+body.no-scroll{overflow:hidden}
 @media (min-width:821px){
   html,body{height:100%}
   .app{height:100%}
@@ -101,6 +113,8 @@ input[type=range]{width:100%; accent-color:var(--accent); margin:0; height:22px}
   .views{top:auto; bottom:10px; right:50%; transform:translateX(50%)}
   .hint{display:none}
   .hint-mobile{display:block}
+  .fs-btn{top:12px; bottom:auto}
+  .chip{max-width:calc(100% - 76px)}
 }
 @media (prefers-reduced-motion: reduce){ *{scroll-behavior:auto} }
 </style>
@@ -131,6 +145,10 @@ input[type=range]{width:100%; accent-color:var(--accent); margin:0; height:22px}
         <button type="button" data-view="oben">Oben</button>
         <button type="button" data-view="schraeg">Schräg</button>
       </div>
+      <button type="button" class="fs-btn" id="fsBtn" title="Vollbild (Taste F)" aria-label="Vollbild einschalten">
+        <svg class="i-enter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>
+        <svg class="i-exit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5"/></svg>
+      </button>
       <p class="hint">Am Körper ziehen = Gelenk bewegen · Hintergrund ziehen = Kamera drehen · Mausrad = Zoom · Rechte Maustaste = verschieben</p>
     </section>
 
@@ -921,6 +939,45 @@ function stepLight(now){
   applyLight();
 }
 applyLight();
+
+/* Vollbild */
+const fsBtn = document.getElementById('fsBtn');
+const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
+function isFull(){ return fsElement() === stageEl || stageEl.classList.contains('pseudo-full'); }
+function syncFull(){
+  const on = isFull();
+  stageEl.classList.toggle('is-full', on);
+  document.body.classList.toggle('no-scroll', stageEl.classList.contains('pseudo-full'));
+  fsBtn.setAttribute('aria-label', on ? 'Vollbild beenden' : 'Vollbild einschalten');
+  fsBtn.title = on ? 'Vollbild beenden (Esc)' : 'Vollbild (Taste F)';
+  resize();
+}
+function toggleFull(){
+  if (isFull()){
+    if (stageEl.classList.contains('pseudo-full')) stageEl.classList.remove('pseudo-full');
+    else if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+    else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+  } else {
+    const req = stageEl.requestFullscreen || stageEl.webkitRequestFullscreen;
+    if (req){
+      try {
+        const p = req.call(stageEl);
+        if (p && p.catch) p.catch(() => { stageEl.classList.add('pseudo-full'); syncFull(); });
+      } catch(e){ stageEl.classList.add('pseudo-full'); }
+    } else stageEl.classList.add('pseudo-full'); // z. B. iPhone: Bühne füllt das ganze Fenster
+  }
+  syncFull();
+}
+fsBtn.addEventListener('click', toggleFull);
+document.addEventListener('fullscreenchange', syncFull);
+document.addEventListener('webkitfullscreenchange', syncFull);
+document.addEventListener('keydown', e => {
+  const t = e.target;
+  const typing = t && (t.tagName === 'INPUT' && t.type === 'text' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT');
+  if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === 'f' || e.key === 'F'){ e.preventDefault(); toggleFull(); }
+  if (e.key === 'Escape' && stageEl.classList.contains('pseudo-full')){ stageEl.classList.remove('pseudo-full'); syncFull(); }
+});
 
 /* Eigene Posen (localStorage, nur Komfort) */
 const KEY = 'gliederpuppe.posen.v1';
