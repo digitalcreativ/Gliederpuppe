@@ -71,6 +71,9 @@ input[type=range]{width:100%; accent-color:var(--accent); margin:0; height:22px}
 .sl-ends{display:flex; justify-content:space-between; font-size:.72rem; color:var(--muted)}
 .empty{margin:0; color:var(--muted); font-size:.85rem; line-height:1.45}
 .note{font-size:.75rem; color:var(--muted); margin:0; line-height:1.4}
+.materials{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px}
+.materials .btn{display:grid; justify-items:center; gap:5px; padding:8px 4px; font-size:.8rem}
+.materials .dot{width:26px; height:26px; border-radius:50%; border:1px solid rgba(0,0,0,.25); box-shadow:inset -4px -5px 8px rgba(0,0,0,.22), inset 3px 3px 6px rgba(255,255,255,.35)}
 .toggles{display:flex; gap:16px; flex-wrap:wrap}
 .toggles label{display:flex; gap:7px; align-items:center; font-size:.85rem; cursor:pointer}
 .toggles input{accent-color:var(--accent); width:16px; height:16px; margin:0}
@@ -173,6 +176,30 @@ input[type=range]{width:100%; accent-color:var(--accent); margin:0; height:22px}
       </section>
 
       <section class="block">
+        <h2>Material</h2>
+        <div class="materials" id="materials" role="group" aria-label="Material der Puppe"></div>
+      </section>
+
+      <section class="block">
+        <h2>Licht</h2>
+        <div class="grid4" id="lightBtns">
+          <button class="btn" type="button" data-az="-90">Links</button>
+          <button class="btn" type="button" data-az="0">Vorne</button>
+          <button class="btn" type="button" data-az="90">Rechts</button>
+          <button class="btn" type="button" data-az="180">Hinten</button>
+        </div>
+        <div class="sliders">
+          <div class="sl"><div class="sl-top"><label for="lightAz">Richtung</label><output id="lightAzOut" for="lightAz"></output></div>
+            <input type="range" id="lightAz" min="-180" max="180" step="1">
+            <div class="sl-ends" aria-hidden="true"><span>hinten · links</span><span>rechts · hinten</span></div></div>
+          <div class="sl"><div class="sl-top"><label for="lightEl">Höhe</label><output id="lightElOut" for="lightEl"></output></div>
+            <input type="range" id="lightEl" min="8" max="88" step="1">
+            <div class="sl-ends" aria-hidden="true"><span>flach (lange Schatten)</span><span>von oben</span></div></div>
+        </div>
+        <p class="note">Links und rechts gelten hier aus deiner Sicht, wenn du die Puppe von vorne anschaust.</p>
+      </section>
+
+      <section class="block">
         <h2>Meine Posen</h2>
         <form class="save" id="saveForm">
           <input id="poseName" type="text" maxlength="40" placeholder="Name, z. B. Tanzen" aria-label="Name der Pose">
@@ -268,9 +295,10 @@ const sun = new THREE.DirectionalLight(0xffffff, 1.15);
 sun.position.set(2.2, 4.2, 3.0);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
-Object.assign(sun.shadow.camera, { left:-2, right:2, top:2.5, bottom:-1, near:0.5, far:12 });
+Object.assign(sun.shadow.camera, { left:-3, right:3, top:3, bottom:-3, near:0.5, far:14 });
 sun.shadow.bias = -0.0005;
-scene.add(sun);
+sun.target.position.set(0, 0.6, 0);
+scene.add(sun, sun.target);
 const fill = new THREE.DirectionalLight(0xdfe8ff, 0.35);
 fill.position.set(-3, 2, -2);
 scene.add(fill);
@@ -285,13 +313,13 @@ grid.position.y = 0.001;
 scene.add(grid);
 
 /* Holz */
-function woodTexture(){
+function woodTexture(base = '#ecd2ae', grain = '160,110,62', strength = 1){
   const c = document.createElement('canvas'); c.width = 256; c.height = 512;
   const g = c.getContext('2d');
-  g.fillStyle = '#ecd2ae'; g.fillRect(0,0,256,512);
+  g.fillStyle = base; g.fillRect(0,0,256,512);
   for (let i = 0; i < 80; i++){
     const x = Math.random()*256;
-    g.strokeStyle = `rgba(160,110,62,${0.04 + Math.random()*0.09})`;
+    g.strokeStyle = `rgba(${grain},${(0.04 + Math.random()*0.09)*strength})`;
     g.lineWidth = 0.5 + Math.random()*1.8;
     g.beginPath();
     for (let y = 0; y <= 512; y += 12){
@@ -811,6 +839,89 @@ function setStool(v){ showStool = v; stoolChk.checked = v; applyPose(); }
 standChk.addEventListener('change', () => { showStand = standChk.checked; applyPose(); });
 stoolChk.addEventListener('change', () => { pushHistory(JSON.stringify({ state, stool:!stoolChk.checked })); setStool(stoolChk.checked); });
 
+/* Material */
+const MATERIALS = [
+  { id:'holz',     label:'Holz',     swatch:'#e3c49b', base:'#ecd2ae', grain:'160,110,62', strength:1,   rough:0.58, metal:0,   pin:0x6f4e30 },
+  { id:'nuss',     label:'Nussbaum', swatch:'#7a4e2e', base:'#8a5a36', grain:'50,25,10',   strength:1.6, rough:0.5,  metal:0,   pin:0x3a2616 },
+  { id:'schwarz',  label:'Schwarz',  swatch:'#232326', base:'#2a2a2e', grain:'0,0,0',      strength:1.4, rough:0.38, metal:0,   pin:0x8a8d93 },
+  { id:'weiss',    label:'Weiss',    swatch:'#f3f1ec', base:'#f4f2ee', grain:'150,145,135',strength:0.6, rough:0.45, metal:0,   pin:0xb9bec4 },
+];
+const MKEY = 'gliederpuppe.material.v1';
+const materialsEl = document.getElementById('materials');
+const texCache = {};
+function setMaterial(id){
+  const m = MATERIALS.find(x => x.id === id) || MATERIALS[0];
+  const tex = texCache[m.id] || (texCache[m.id] = m.id === 'holz' ? woodMap : woodTexture(m.base, m.grain, m.strength));
+  for (const k in mats){
+    const mt = mats[k];
+    mt.map = tex; mt.roughness = m.rough; mt.metalness = m.metal; mt.needsUpdate = true;
+  }
+  // Sockel und Hocker im gleichen Material, leicht abgedunkelt
+  propMat.map = tex; propMat.roughness = m.rough; propMat.needsUpdate = true;
+  propMat.color.setHex(m.id === 'holz' ? 0xc89c6c : 0xd6d6d6);
+  pinMat.color.setHex(m.pin);
+  pinMat.metalness = m.id === 'holz' || m.id === 'nuss' ? 0.35 : 0.8;
+  materialsEl.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mat === m.id)));
+  try { localStorage.setItem(MKEY, m.id); } catch(e){}
+}
+MATERIALS.forEach(m => {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'btn'; b.dataset.mat = m.id; b.setAttribute('aria-pressed', 'false');
+  b.innerHTML = `<span class="dot" style="background:${m.swatch}"></span>${m.label}`;
+  b.addEventListener('click', () => setMaterial(m.id));
+  materialsEl.appendChild(b);
+});
+let savedMat = 'holz';
+try { savedMat = localStorage.getItem(MKEY) || 'holz'; } catch(e){}
+setMaterial(savedMat);
+
+/* Licht */
+const LKEY = 'gliederpuppe.licht.v1';
+const lightAz = document.getElementById('lightAz'), lightEl = document.getElementById('lightEl');
+const lightAzOut = document.getElementById('lightAzOut'), lightElOut = document.getElementById('lightElOut');
+let light = { az:36, el:49 };
+try { const l = JSON.parse(localStorage.getItem(LKEY) || 'null'); if (l && isFinite(l.az) && isFinite(l.el)) light = l; } catch(e){}
+let lightTween = null;
+function azText(a){
+  a = ((Math.round(a) + 540) % 360) - 180;
+  const names = [[-180,'hinten'],[-135,'hinten links'],[-90,'links'],[-45,'vorne links'],[0,'vorne'],[45,'vorne rechts'],[90,'rechts'],[135,'hinten rechts'],[180,'hinten']];
+  let best = names[0];
+  for (const n of names) if (Math.abs(n[0] - a) < Math.abs(best[0] - a)) best = n;
+  return best[1];
+}
+function applyLight(){
+  const az = light.az*DEG, el = light.el*DEG, r = 5.6;
+  sun.position.set(Math.sin(az)*Math.cos(el)*r, 0.6 + Math.sin(el)*r, Math.cos(az)*Math.cos(el)*r);
+  // flaches Licht wird etwas wärmer und schwächer, wie bei Abendsonne
+  const low = 1 - Math.min(1, light.el/40);
+  sun.color.setRGB(1, 1 - 0.12*low, 1 - 0.28*low);
+  sun.intensity = 1.15 - 0.2*low;
+  if (document.activeElement !== lightAz) lightAz.value = Math.round(light.az);
+  if (document.activeElement !== lightEl) lightEl.value = Math.round(light.el);
+  lightAzOut.textContent = azText(light.az);
+  lightElOut.textContent = Math.round(light.el) + '°';
+}
+function storeLight(){ try { localStorage.setItem(LKEY, JSON.stringify(light)); } catch(e){} }
+lightAz.addEventListener('input', () => { lightTween = null; light.az = +lightAz.value; applyLight(); });
+lightEl.addEventListener('input', () => { lightTween = null; light.el = +lightEl.value; applyLight(); });
+lightAz.addEventListener('change', storeLight);
+lightEl.addEventListener('change', storeLight);
+document.querySelectorAll('[data-az]').forEach(b => b.addEventListener('click', () => {
+  let to = +b.dataset.az;
+  // kürzesten Weg drehen
+  while (to - light.az > 180) to -= 360;
+  while (to - light.az < -180) to += 360;
+  lightTween = { from:light.az, to, t0:performance.now() };
+}));
+function stepLight(now){
+  if (!lightTween) return;
+  const t = Math.min(1, (now - lightTween.t0)/600);
+  light.az = lightTween.from + (lightTween.to - lightTween.from)*ease(t);
+  if (t >= 1){ light.az = ((lightTween.to + 540) % 360) - 180; lightTween = null; storeLight(); }
+  applyLight();
+}
+applyLight();
+
 /* Eigene Posen (localStorage, nur Komfort) */
 const KEY = 'gliederpuppe.posen.v1';
 const savedList = document.getElementById('savedList');
@@ -860,6 +971,7 @@ function loop(now){
     controls.target.lerpVectors(camTween.fromT, new V3(0, 0.98, 0), e);
     if (t >= 1) camTween = null;
   }
+  stepLight(now);
   controls.update();
   renderer.render(scene, camera);
   requestAnimationFrame(loop);
